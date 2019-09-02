@@ -23,14 +23,15 @@ CLI example:
 ```
 
 NOTE:
-Supports all model's but only tested on ER-12 
-This currently only works for dnsmasq
+* Supports all model's but only tested on ER-12 
+* This currently only works for dnsmasq
+* There is logic added that will not overwrite the dnsmsaq-dhcp-config.pl file if ubnt made changes to it since the last version
 
 
 
 TODO:
--add log messages on error's
--add dhcpd support
+* add log messages on error's
+* add dhcpd support
   
   
 

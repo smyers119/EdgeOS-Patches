@@ -1,0 +1,9 @@
+Package: vyatta-cfg-dhcp-server.patch
+Version: 1.0-2
+Section: base
+Priority: optional
+Architecture: all
+Depends: vyatta-cfg-dhcp-server
+Maintainer: Steven Myers <stevo119@comcast.net>
+Description: Patch dnsmasq with optional static lease file
+

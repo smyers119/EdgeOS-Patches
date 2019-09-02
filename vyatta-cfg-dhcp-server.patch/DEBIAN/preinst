@@ -1,0 +1,18 @@
+#!/bin/bash
+# vyatta-cfg-dhcp-server.patch
+# Checks for valid check sum and proceeds with install
+file="/opt/vyatta/sbin/dnsmasq-dhcp-config.pl"
+fileold="/opt/vyatta/sbin/dnsmasq-dhcp-config.pl.old"
+sum="dae0b9fa8b6e0f52712746830a2029cb"
+chksrv="systemctl is-active --quiet dnsmasq"
+md5=($(md5sum $file))
+[ ! -f "$file" ] && exit 1
+if [ $md5 == $sum ]; then
+ if $chksrv; then systemctl stop dnsmasq; fi
+ dpkg-divert --add --package vyatta-cfg-dhcp-server.patch --rename --divert $fileold $file
+ echo "ok"
+ exit 0
+else
+ echo "no file"
+ exit 1
+fi

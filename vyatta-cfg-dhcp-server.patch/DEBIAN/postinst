@@ -1,0 +1,4 @@
+#!/bin/bash
+chksrv="systemctl is-active --quiet dnsmasq"
+if $chksrv; then exit 1; else systemctl start dnsmasq; fi
+exit 0

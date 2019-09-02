@@ -1,0 +1,3 @@
+#!/bin/bash
+file="/opt/vyatta/sbin/dnsmasq-dhcp-config.pl"
+dpkg-divert --remove --package vyatta-cfg-dhcp-server.patch --rename $file

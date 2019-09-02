@@ -1,0 +1,9 @@
+type:  txt
+default:  "disable"
+help: Option to make dnsmasq use persistant lease file
+syntax:expression: ($VAR(@) == "disable" || $VAR(@) == "enable" ) ; \
+"Invalid keyword $VAR(@) for persist-lease. Specify 'enable' or 'disable'"
+allowed: echo "enable disable"
+val_help: enable; Enable persistant leases for dnsmasq
+val_help: disable; Disable persistant leases for dnsmasq (default)
+

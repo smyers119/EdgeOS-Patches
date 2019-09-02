@@ -1,5 +1,11 @@
 # EdgeOS-Patches
 
+To make patches persist across upgrades add the .deb to
+```
+     /config/data/firstboot/install-packages
+```
+
+
 ### Vyatta-cfg-dhcp-server.patch
 #### Currently tested and working on version 2.0.7 and below
 This patch add's the ability to assign a persistant lease file

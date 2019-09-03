@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+# Remove the cache file so that the directory can be deleted.
+#
+if [ "$1" = "remove" -o "$1" = "purge" ]; then
+    rm -f /var/cache/ddclient/ddclient.cache
+fi
+
+exit 0
+

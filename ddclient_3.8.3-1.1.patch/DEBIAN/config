@@ -1,0 +1,278 @@
+#!/bin/sh
+## debconf config script for ddclient
+##
+## This script runs before copying the files of the package to the correct
+## locations in the system.
+##
+## It gets the appropriate configuration values and stores them in the debconf
+## database. If necessary it asks the user about some needed information.
+##
+## This file is human readable by using "grep '#' <thisfile>"
+#
+
+set -e
+
+# -*- sh -*-
+# This file can be included with #SCRIPTSCOMMON#
+
+# Fire up debconf and ensure it is at least version 2.0
+# Usage: load_debconf2 "$@"  - needed as debconf will exec the current script,
+# passing the current shell parameters. So we must lift these into the shell
+# function. Missing this caused bug #555151.
+load_debconf2() {
+   . /usr/share/debconf/confmodule
+   if ! db_version 2.0; then
+      echo >&2 "$0: need DebConf 2.0 or later"
+      exit 1
+   fi
+}
+
+# Usage: y=`quote_backslashes "$x"`
+# Quotes each backslash in $x with another backslash, outputs result.
+quote_backslashes() {
+  echo -n "$1" | sed 's,\\,\\\\,g'
+}
+
+# Usage: hosts=`download_hostlist USER PASSWORD`
+# Retrieves the DynDNS hosts of given user
+download_hostlist() {
+  local username=$1 password=$2
+  # FIXME: protect against wget not installed
+  wget "http://$username:$password@update.dyndns.com/text/gethostlist" -q -O -\
+    | awk -F \: '{print $2, $4}' | sed -e "N;s/ \n/,/g" | sed -e "s/,/, /g"
+}
+
+# Retrieve the list of DynDNS hosts of the user's account from the DynDNS
+# server and let the user select which hosts to update.
+retrieve_dyndns_hostlist() {
+  db_get ddclient/username	&& username="$RET"
+  db_get ddclient/password	&& password="$RET"
+
+  hostslist=`download_hostlist $username $password`
+
+  # add the list to our multichoice template, then prompt the user
+  db_subst ddclient/hostslist choices $hostslist
+  db_input critical ddclient/hostslist || true
+  db_go
+
+  # set names using the host list to write it to the config file later
+  db_get ddclient/hostslist
+  hostslist=`echo "$RET" | sed -e "s/, /,/g"`
+  db_set ddclient/names "$hostslist"
+
+  # if the hostslist was blank, let the user know some possible reasons
+  if [ -z $hostslist ]; then
+    db_input high ddclient/blankhostslist || true
+    db_go
+  fi
+}
+
+
+load_debconf2 "$@"
+
+#----------------------------------------------------------------------------
+# read_old_config() - read the configuration from the old config file
+#----------------------------------------------------------------------------
+read_old_config()
+{
+  # read out the existing config file
+  read host username password </etc/ddclient.conf
+
+  # put the old values into the database
+  db_set ddclient/host $host
+  db_set ddclient/username $username
+  db_set ddclient/password $password
+  db_set ddclient/names $host
+
+  # set reasonable defaults for the new config options
+  db_set ddclient/service www.dyndns.com
+  db_set ddclient/server members.dyndns.org
+  db_set ddclient/protocol dyndns2
+
+  # important: we do not set the interface variable
+
+  db_set ddclient/run_daemon false
+  db_set ddclient/run_ipup false
+  db_set ddclient/run_dhclient false
+}
+
+
+#----------------------------------------------------------------------------
+# warn_config_broken() - show warning that the current config is broken
+#----------------------------------------------------------------------------
+warn_config_broken()
+{
+  db_fset ddclient/modifiedconfig seen false
+  db_input high ddclient/modifiedconfig || true
+  db_go
+}
+
+
+#----------------------------------------------------------------------------
+# create_new_config() - create a new config from scratch
+#----------------------------------------------------------------------------
+create_new_config()
+{
+  # get the service to use with ddclient
+  db_input critical ddclient/service || true
+  db_go
+  db_get ddclient/service
+  case "$RET" in
+    www.dyndns.com)
+      server=members.dyndns.org
+      protocol=dyndns2
+      ;;
+    www.easydns.com)
+      server=members.easydns.com
+      protocol=easydns
+      ;;
+    www.dslreports.com)
+      server=www.dslreports.com
+      protocol=dslreports1
+      ;;
+    www.zoneedit.com)
+      server=dynamic.zoneedit.com
+      protocol=zoneedit1
+      ;;
+  esac
+  if [ "$RET" != other ]; then
+    # if we know the service we put in the server and protocol
+    db_set ddclient/server $server
+    db_fset ddclient/server seen true
+    db_set ddclient/protocol $protocol
+    db_fset ddclient/protocol seen true
+  else
+    # if not we ask the user about the server and protocol
+    db_input critical ddclient/server || true
+    db_input critical ddclient/protocol || true
+    db_go
+  fi
+
+  # ask the user about the dynamic DNS names, account and interface
+  db_input critical ddclient/username || true
+  db_input critical ddclient/password || true
+  db_input critical ddclient/password-repeat || true
+  db_get ddclient/service
+  # if the chosen service is dyndns, ask some extra questions.  otherwise, set them to false
+  if [ "$RET" = "www.dyndns.com" ]; then
+  	db_input critical ddclient/checkip || true
+	if [ -f /usr/bin/wget ]; then
+		db_input critical ddclient/fetchhosts || true
+	else
+		db_fset ddclient/fetchhosts seen true
+		db_set ddclient/fetchhosts Manually
+	fi
+  else
+  	db_fset ddclient/checkip seen true
+	db_fset ddclient/fetchhosts seen true
+	db_set ddclient/checkip false
+	db_set ddclient/fetchhosts Manually
+  fi
+  db_go
+
+  # Re-request passwords until they match
+  while true; do
+    db_get ddclient/password
+    password="$RET"
+    db_get ddclient/password-repeat
+    if [ "$password" = "$RET" ]; then
+      break
+    fi
+    db_fset ddclient/password seen false
+    db_fset ddclient/password-repeat seen false
+    db_fset ddclient/password-mismatch seen false
+    db_input critical ddclient/password-mismatch || true
+    db_input critical ddclient/password || true
+    db_input critical ddclient/password-repeat || true
+    db_go
+  done
+
+  db_set ddclient/password-repeat ""
+
+  db_get ddclient/checkip
+  # ask the traditional questions if the dyndns questions weren't answered true
+  if [ "$RET" = "false" ]; then
+	db_input critical ddclient/interface || true
+  fi
+  db_get ddclient/fetchhosts
+
+  # check if we should fetch the hostlist for a dyndns account
+  db_get ddclient/fetchhosts
+  if [ "$RET" = "From list" ]; then
+      retrieve_dyndns_hostlist
+  else
+      db_input critical ddclient/names || true
+  fi
+  db_go
+
+  # set the default mode ddclient should run in (ip-up | daemon),
+  # depending on the entered interface (XpppX or other)
+  db_get ddclient/interface
+  interface=$RET
+  db_get ddclient/checkip
+  checkip=$RET
+
+  # if it is actually a ppp or related interface, and we're not using checkip
+  if [ "$checkip" != "true"  ] && [ -z "${interface##*ppp*}" ]; then
+    db_fget ddclient/run_ipup seen
+    if [ "$RET" = "false" ]; then
+      db_set ddclient/run_ipup true
+    fi
+  # if it is an interface of a different type
+  else
+    db_fget ddclient/run_daemon seen
+    if [ "$RET" = "false" ]; then
+      db_set ddclient/run_daemon true
+    fi
+  fi
+
+  # maybe ask the user to override the default values
+  db_input medium ddclient/run_ipup || true
+  db_go
+  
+  # if using ipup dont use daemon, bug #462207
+  db_get ddclient/run_ipup
+  if [ "$RET" = "true" ]; then
+      db_set ddclient/run_daemon false
+  else
+      db_input medium ddclient/run_daemon || true
+      db_go
+  fi
+  
+ 
+  # if ddclient should run in daemon mode we ask for the update interval
+  db_get ddclient/run_daemon
+  if [ "$RET" = "true" ]; then
+    db_input medium ddclient/daemon_interval || true
+    db_go
+  fi
+}
+
+
+
+if [ "$1" = "configure" ]; then
+
+  if [ ! -f /etc/ddclient.conf ]; then
+	create_new_config
+	exit 0
+  fi
+
+  if dpkg --compare-versions "$2" lt-nl 3.6.2-1; then
+    # if the existing /etc/ddclient.conf consists of three words:
+    if [ "`wc -w </etc/ddclient.conf`" -eq 3 ]; then
+      read_old_config
+      exit 0
+    else
+      warn_config_broken
+      exit 1
+    fi
+
+  else
+    exit 0
+  fi
+
+elif [ "$1" = "reconfigure" ] ; then
+
+  create_new_config
+  rm -f /etc/ddclient.conf /etc/default/ddclient
+fi

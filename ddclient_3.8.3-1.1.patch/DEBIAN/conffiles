@@ -1,0 +1,3 @@
+/etc/dhcp/dhclient-exit-hooks.d/ddclient
+/etc/init.d/ddclient
+/etc/ppp/ip-up.d/ddclient

@@ -1,0 +1,37 @@
+#!/bin/sh
+#
+# ip-up script for ddclient
+
+# # These variables are for the use of the scripts run by run-parts
+# PPP_IFACE="$1"
+# PPP_TTY="$2"
+# PPP_SPEED="$3"
+# PPP_LOCAL="$4"
+# PPP_REMOTE="$5"
+# PPP_IPPARAM="$6"
+
+
+# only run ddclient, if it is installed ;-)
+if [ ! -x /usr/sbin/ddclient ]; then
+  exit 0
+fi
+
+# Check, if this script is activated
+if [ -f /etc/default/ddclient ]; then
+  . /etc/default/ddclient
+  if [ ! $run_ipup = "true" ]; then
+    exit 0
+  fi
+  # Check, if this is the interface used for DynDNS (there could be other pppds
+  eval `sed -n 's/\(if=[^ 	,]*\)/\1/p' /etc/ddclient.conf`
+  if [ ! $if = $PPP_IFACE ]; then
+    exit 0
+  fi
+else
+  # No configuration defaults file, so do not run
+  exit 0
+fi
+
+
+# Run ddclient with the IP address of the ppp device
+/usr/sbin/ddclient -syslog -ip $PPP_LOCAL

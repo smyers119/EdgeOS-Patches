@@ -1,6 +1,6 @@
 #!/bin/bash
 # originial script by @ubnt-stig from community.ubnt.com
-# This is my attempt to optimize it and I added a latency which i plan to optimize as well.
+# This is my attempt to optimize it.
 # add your ping targets here 
 targets=( 
    '1.1.1.1'        

@@ -1,0 +1,30 @@
+#!/bin/bash
+# originial script by @ubnt-stig from community.ubnt.com
+# This is my attempt to optimize it and I added a latency which i plan to optimize as well.
+# add your ping targets here 
+targets=( 
+   '1.1.1.1'        
+   '8.8.8.8'        
+   '8.8.4.4' 
+   ) 
+# add max latency here
+max=500
+[ $# != 3 ] && echo "Usages: $0 <group> <intf> <status>" exit 1 
+group=$1 
+intf=$2 
+status=$3         
+for host in "${targets[@]}" 
+do    
+/bin/ping -n -c 1 -W 1 -w 1 -I $intf $host &> /dev/null  
+if [ $? == 0 ]     
+then
+#check latency
+latency=$(/bin/ping -n -c 4 -W 2 -w 1 -I $intf $host | tail -1| awk -F '/' '{print $5}')
+strip=$(echo ${latency%.*})
+[ $strip -gt $max ] && exit 1
+#end check latency
+exit 0    
+fi    
+done 
+# fail 
+exit 1

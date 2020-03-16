@@ -26,7 +26,7 @@ use Sys::Hostname;
 use IO::Socket;
 #use Data::Validate::IP;
 
-my $version  = "3.9.0";
+my $version  = "3.9.1";
 my $programd  = $0; 
 $programd =~ s%^.*/%%;
 my $program   = $programd;
@@ -483,9 +483,15 @@ my %variables = (
         'warned-min-interval'       => setv(T_ANY,    0, 1, 0, 0,             undef),
         'warned-min-error-interval' => setv(T_ANY,    0, 1, 0, 0,             undef),
     },
+    'yandex-common-defaults'       => {
+        'server'              => setv(T_FQDNP,  1, 0, 1, 'pddimp.yandex.ru', undef),
+    },
     'dnsmadeeasy-common-defaults'   => {
         'server'          => setv(T_FQDNP,  1, 0, 1, 'cp.dnsmadeeasy.com',    undef),
         'script'          => setv(T_STRING, 1, 1, 1, '/servlet/updateip',     undef),
+    },    
+    'dondominio-common-defaults'       => {
+        'server'	      => setv(T_FQDNP,  1, 0, 1, 'dondns.dondominio.com', undef),
     },
 );
 my %services = (
@@ -592,6 +598,18 @@ my %services = (
                           $variables{'service-common-defaults'},
                         ),
     },
+    'nfsn' => {
+		'updateable' => undef,
+		'update'     => \&nic_nfsn_update,
+		'examples'   => \&nic_nfsn_examples,
+		'variables'  => merge(
+			{ 'server'       => setv(T_FQDNP,  1, 0, 1, 'api.nearlyfreespeech.net', undef) },
+			{ 'min_interval' => setv(T_FQDNP,  0, 0, 1, 0, interval('5m')) },
+			{ 'ttl'          => setv(T_NUMBER, 1, 0, 1, 300, undef) },
+			{ 'zone'         => setv(T_FQDN,   1, 0, 1, undef, undef) },
+			$variables{'service-common-defaults'},
+		),
+    },
     'sitelutions' => {
         'updateable' => undef,
         'update'     => \&nic_sitelutions_update,
@@ -689,6 +707,16 @@ my %services = (
             $variables{'woima-service-common-defaults'},
         ),
     },
+    'yandex' => {
+        'updateable' => undef,
+        'update'     => \&nic_yandex_update,
+        'examples'   => \&nic_yandex_examples,
+        'variables'  => merge(
+            { 'min-interval' => setv(T_DELAY,  0, 0, 1, interval('5m'), 0),},
+            $variables{'yandex-common-defaults'},
+            $variables{'service-common-defaults'},
+            ),
+    },
     'dnsmadeeasy' => {
         'updateable' => undef,
         'update'     => \&nic_dnsmadeeasy_update,
@@ -698,11 +726,20 @@ my %services = (
                           $variables{'service-common-defaults'},
                         ),
     },
+    'dondominio' => {
+        'updateable' => undef,
+        'update'     => \&nic_dondominio_update,
+        'examples'   => \&nic_dondominio_examples,
+        'variables'  => merge(
+            $variables{'dondominio-common-defaults'},
+            $variables{'service-common-defaults'},
+            ),
+    },
 );
 $variables{'merged'} = merge($variables{'global-defaults'},
-			     $variables{'service-common-defaults'},
-			     $variables{'dyndns-common-defaults'},
-			     map { $services{$_}{'variables'} } keys %services,
+    $variables{'service-common-defaults'},
+    $variables{'dyndns-common-defaults'},
+    map { $services{$_}{'variables'} } keys %services,
 );
 
 my @opt = (
@@ -1358,8 +1395,8 @@ sub init_config {
 	$proto = $config{$h}{'protocol'};
 	$proto = opt('protocol')          if !defined($proto);
 
-	load_sha1_support() if ($proto eq "freedns");
-	load_json_support() if ($proto eq "cloudflare");
+	load_sha1_support($proto) if (grep (/^$proto$/, ("freedns", "nfsn")));
+	load_json_support($proto) if (grep (/^$proto$/, ("cloudflare","yandex","nfsn")));
 
  	if (!exists($services{$proto})) {
 	    warning("skipping host: %s: unrecognized protocol '%s'", $h, $proto);
@@ -1944,11 +1981,12 @@ EOM
 ## load_sha1_support
 ######################################################################
 sub load_sha1_support {
+    my $why = shift;
     my $sha1_loaded = eval {require Digest::SHA1};
     my $sha_loaded = eval {require Digest::SHA};
     unless ($sha1_loaded || $sha_loaded) {
         fatal(<<"EOM");
-Error loading the Perl module Digest::SHA1 or Digest::SHA needed for freedns update.
+Error loading the Perl module Digest::SHA1 or Digest::SHA needed for $why update.
 On Debian, the package libdigest-sha1-perl or libdigest-sha-perl must be installed.
 EOM
     }
@@ -1962,10 +2000,11 @@ EOM
 ## load_json_support
 ######################################################################
 sub load_json_support {
+	my $why = shift;
 	my $json_loaded = eval {require JSON::PP};
 	unless ($json_loaded) {
 		fatal(<<"EOM");
-Error loading the Perl module JSON::PP needed for cloudflare update.
+Error loading the Perl module JSON::PP needed for $why update.
 EOM
 	}
 	import JSON::PP (qw/decode_json/);
@@ -2022,16 +2061,23 @@ sub geturl {
     verbose("CONNECT:", "%s", $to);
 
     $request  = "$method ";
-    $request .= "http://$server" if $proxy;
+    if (!$use_ssl) {
+        $request .= "http://$server" if $proxy;
+    } else {
+        $request .= "https://$server" if $proxy;
+    }
     $request .= "/$url HTTP/1.0\n";
     $request .= "Host: $server\n";
 
     my $auth = encode_base64("${login}:${password}", "");
     $request .= "Authorization: Basic $auth\n" if $login || $password;
     $request .= "User-Agent: ${program}/${version}\n";
+    if ($data) {
+        $request .= "Content-Type: application/x-www-form-urlencoded\n" if ! $headers =~ /^Content-Type: /;
+        $request .= "Content-Length: " . length($data) . "\n";
+    }
     $request .= "Connection: close\n";
     $request .= "$headers\n";
-    $request .= "Content-Length: ".length($data)."\n" if $data;
     $request .= "\n";
     $request .= $data;
 
@@ -2320,6 +2366,35 @@ sub group_hosts_by {
     }
     return %groups;
 }
+######################################################################
+## encode_www_form_urlencoded
+######################################################################
+sub encode_www_form_urlencoded {
+    my $formdata = shift;
+
+    my $must_encode = qr'[<>"#%{}|\\^~\[\]`;/?:=&+]';
+    my $encoded;
+    my $i = 0;
+    foreach my $k (keys %$formdata) {
+        my $kenc = $k;
+        my $venc = $formdata->{$k};
+
+        $kenc =~ s/($must_encode)/sprintf('%%%02X', ord($1))/ge;
+        $venc =~ s/($must_encode)/sprintf('%%%02X', ord($1))/ge;
+
+        $kenc =~ s/ /+/g;
+        $venc =~ s/ /+/g;
+
+        $encoded .= $kenc.'='.$venc;
+        if ($i < (keys %$formdata) - 1) {
+            $encoded .= '&';
+        }
+        $i++;
+    }
+
+    return $encoded;
+}
+
 ######################################################################
 ## nic_examples
 ######################################################################
@@ -3613,12 +3688,12 @@ Configuration variables applicable to the 'namecheap' protocol are:
   server=fqdn.of.service       ## defaults to dynamicdns.park-your-domain.com
   login=service-login          ## login name and password  registered with the service
   password=service-password    ##
-  hostname                     ## the hostname to update.
+  fully.qualified.host         ## the hostname to update.
 
 Example ${program}.conf file entries:
   ## single host update
-  protocol=namecheap,                                         \\
-  login=my-namecheap.com-login,                               \\
+  protocol=namecheap                                          \\
+  login=my-namecheap.com-login                                \\
   password=my-namecheap.com-password                          \\
   myhost
 
@@ -3643,15 +3718,17 @@ sub nic_namecheap_update {
 
     ## update each configured host
     foreach my $h (@_) {
-	my $ip = delete $config{$h}{'wantip'};
+        my $ip = delete $config{$h}{'wantip'};
         info("setting IP address to %s for %s", $ip, $h);
         verbose("UPDATE:","updating %s", $h);
 
         my $url;
         $url   = "https://$config{$h}{'server'}/update";
-	my $domain = $config{$h}{'login'};
-	$url  .= "?host=$h";
-	$url  .= "&domain=$domain";
+        my $domain = $config{$h}{'login'};
+        my $host = $h;
+        $host  =~ s/(.*)\.$domain(.*)/$1$2/;
+        $url  .= "?host=$host";
+        $url  .= "&domain=$domain";
         $url  .= "&password=$config{$h}{'password'}";
         $url  .= "&ip=";
         $url  .= $ip if $ip;
@@ -3680,6 +3757,227 @@ sub nic_namecheap_update {
 
 ######################################################################
 
+######################################################################
+## nic_nfsn_examples
+######################################################################
+sub nic_nfsn_examples {
+    return <<EoEXAMPLE;
+
+o 'nfsn'
+
+The 'nfsn' protocol is used for the DNS service offered by www.nearlyfreespeech.net. Use this URL to get your API-Key-password:
+  https://members.nearlyfreespeech.net/support/assist?tag=apikey
+
+Configuration variables applicable to the 'nfsn' protocol are:
+  protocol=nfsn
+  server=api-server    ## defaults to api.nearlyfreespeech.net
+  login=member-login   ## NearlyFreeSpeech.net login name
+  password=api-key     ## NearlyFreeSpeech.net API key
+  zone=zone            ## The DNS zone under which the hostname falls; e.g. example.com
+  hostname             ## the hostname to update in the specified zone; e.g. example.com or www.example.com
+
+Example ${program}.conf file entries:
+  ## update two hosts (example.com and www.example.com) in example.com zone
+  protocol=nfsn,                                         \\
+  login=my-nfsn-member-login,                            \\
+  password=my-nfsn-api-key,                              \\
+  zone=example.com                                       \\
+  example.com,www.example.com
+
+  ## repeat the above for other zones, e.g. example.net:
+  [...]
+  zone=example.net                                       \\
+  subdomain1.example.net,subdomain2.example.net
+
+EoEXAMPLE
+}
+
+######################################################################
+## nic_nfsn_gen_auth_header
+######################################################################
+sub nic_nfsn_gen_auth_header {
+    my $h = shift;
+    my $path = shift;
+    my $body = shift || '';
+
+    ## API requests must include a custom HTTP header in the
+    ## following format:
+    ##
+    ## X-NFSN-Authentication: login;timestamp;salt;hash
+    ##
+    ## In this header, login is the member login name of the user
+    ## making the API request.
+    my $auth_header = 'X-NFSN-Authentication: ';
+    $auth_header .= $config{$h}{'login'} . ';';
+
+    ## timestamp is the standard 32-bit unsigned Unix timestamp
+    ## value.
+    my $timestamp = time();
+    $auth_header .= $timestamp . ';';
+
+    ## salt is a randomly generated 16 character alphanumeric value
+    ## (a-z, A-Z, 0-9).
+    my @chars = ('A'..'Z', 'a'..'z', '0'..'9');
+    my $salt;
+    for (my $i = 0; $i < 16; $i++) {
+        $salt .= $chars[int(rand(@chars))];
+    }
+    $auth_header .= $salt . ';';   
+
+    ## hash is a SHA1 hash of a string in the following format:
+    ## login;timestamp;salt;api-key;request-uri;body-hash
+    my $hash_string = $config{$h}{'login'}.';'.
+              $timestamp          . ';' .
+              $salt           . ';' .
+              $config{$h}{'password'} . ';';
+
+    ## The request-uri value is the path portion of the requested URL
+    ## (i.e. excluding the protocol and hostname).
+    $hash_string .= $path . ';';
+
+    ## The body-hash is the SHA1 hash of the request body (if any).
+    ## If there is no request body, the SHA1 hash of the empty string
+    ## must be used.
+    my $body_hash = sha1_hex($body);
+    $hash_string .= $body_hash;
+
+    my $hash = sha1_hex($hash_string);
+    $auth_header .= $hash;
+
+    return $auth_header;
+}
+
+######################################################################
+## nic_nfsn_make_request
+######################################################################
+sub nic_nfsn_make_request {
+    my $h = shift;
+    my $path = shift;
+    my $method = shift || 'GET';
+    my $body = shift || '';
+
+    my $base_url = "https://$config{$h}{'server'}";
+    my $url = $base_url . $path;
+    my $header = nic_nfsn_gen_auth_header($h, $path, $body);
+    if ($method eq 'POST' && $body ne '') {
+        $header .= "\nContent-Type: application/x-www-form-urlencoded";
+    }
+
+    return geturl(opt('proxy'), $url, '', '', $header, $method, $body);
+}
+
+######################################################################
+## nic_nfsn_handle_error
+######################################################################
+sub nic_nfsn_handle_error {
+    my $resp = shift;
+    my $h = shift;
+
+    $resp =~ s/^.*?\n\n//s; # Strip header
+    my $json = eval {decode_json($resp)};
+    if ($@ || ref($json) ne 'HASH' || not defined $json->{'error'}) {
+        failed("Invalid error response: %s", $resp);
+        return;
+    }
+
+    failed($json->{'error'});
+    if (defined $json->{'debug'}) {
+        failed($json->{'debug'});
+    }
+}
+
+######################################################################
+## nic_nfsn_update
+##
+## Written by John Brooks
+##
+## Based on API docs: https://members.nearlyfreespeech.net/wiki/API/Introduction
+## Uses the API endpoints under https://api.nearlyfreespeech.net/dns/$zone/
+##
+## NB: There is no "updateRR" API function; to update an existing RR, we use
+##     removeRR to delete the RR, and then addRR to re-add it with the new data.
+##
+######################################################################
+sub nic_nfsn_update {
+    debug("\nnic_nfsn_update -------------------");
+
+    ## update each configured host
+    foreach my $h (@_) {
+        my $zone = $config{$h}{'zone'};
+        my $name;
+
+        if ($h eq $zone) {
+            $name = '';
+        } elsif ($h !~ /$zone$/) {
+            $config{$h}{'status'} = 'failed';
+            failed("updating %s: %s is outside zone %s", $h, $h,
+                   $zone);
+            next;
+        } else {
+            $name = $h;
+            $name =~ s/(.*)\.${zone}$/$1/;
+        }
+
+        my $ip = delete $config{$h}{'wantip'};
+        info("setting IP address to %s for %s", $ip, $h);
+        verbose("UPDATE", "updating %s", $h);
+
+        my $list_path = "/dns/$zone/listRRs";
+        my $list_body = encode_www_form_urlencoded({name => $name,
+                                type => 'A'});
+        my $list_resp = nic_nfsn_make_request($h, $list_path, 'POST',
+                              $list_body);
+        if (!header_ok($h, $list_resp)) {
+            $config{$h}{'status'} = 'failed';
+            nic_nfsn_handle_error($list_resp, $h);
+            next;
+        }
+
+        $list_resp =~ s/^.*?\n\n//s; # Strip header
+        my $list = eval{decode_json($list_resp)};
+        if ($@) {
+            $config{$h}{'status'} = 'failed';
+            failed("updating %s: JSON decoding failure", $h);
+            next;
+        }
+
+        my $rr_ttl = $config{$h}{'ttl'};
+
+        if (ref($list) eq 'ARRAY' && defined $list->[0]->{'data'}) {
+            my $rr_data = $list->[0]->{'data'};
+            my $rm_path = "/dns/$zone/removeRR";
+            my $rm_data = {name => $name,
+                       type => 'A',
+                       data => $rr_data};
+            my $rm_body = encode_www_form_urlencoded($rm_data);
+            my $rm_resp = nic_nfsn_make_request($h, $rm_path,
+                                'POST', $rm_body);
+            if (!header_ok($h, $rm_resp)) {
+                $config{$h}{'status'} = 'failed';
+                nic_nfsn_handle_error($rm_resp);
+                next;
+            }
+        }
+
+        my $add_path = "/dns/$zone/addRR";
+        my $add_data = {name => $name,
+                type => 'A',
+                data => $ip,
+                ttl => $rr_ttl};
+        my $add_body = encode_www_form_urlencoded($add_data);
+        my $add_resp = nic_nfsn_make_request($h, $add_path, 'POST',
+                             $add_body);
+        if (header_ok($h, $add_resp)) {
+            $config{$h}{'ip'}     = $ip;
+            $config{$h}{'mtime'}  = $now;
+            $config{$h}{'status'} = 'good';
+            success("updating %s: good: IP address set to %s", $h, $ip);
+        } else {
+            $config{$h}{'status'} = 'failed';
+            nic_nfsn_handle_error($add_resp, $h);
+        }
+    }
+}
 
 ######################################################################
 
@@ -4359,6 +4657,120 @@ sub nic_cloudflare_update {
 		}
 	}
 }
+######################################################################
+## nic_yandex_examples
+######################################################################
+sub nic_yandex_examples {
+    return <<EoEXAMPLE;
+o Yandex
+
+The 'yandex' protocol is used to by DNS service offered by Yandex.
+
+Configuration variables applicable to the 'yandex' protocol are:
+  protocol=yandex             ##
+  server=fqdn.of.service       ## defaults to pddimp.yandex.ru
+  login=dns.zone               ## Your zone name
+  password=pdd-token           ## PDD token for authentication
+  fully.qualified.host         ## the host registered with the service.
+
+Example ${program}.conf file entries:
+  ## single host update
+  protocol=yandex,                                         \\
+  login=myhost.com,                                        \\
+  password=123456789ABCDEF0000000000000000000000000000000000000 \\
+  record.myhost.com
+
+  ## multiple host update
+  protocol=yandex,                                         \\
+  login=myhost.com,                                        \\
+  password=123456789ABCDEF0000000000000000000000000000000000000 \\
+  record.myhost.com,other.myhost.com
+EoEXAMPLE
+}
+######################################################################
+## nic_yandex_update
+##
+## written by Denis Akimkin
+##
+######################################################################
+sub nic_yandex_update {
+    debug("\nnic_yandex_update -------------------");
+
+    ## group hosts with identical attributes together
+    my %groups = group_hosts_by([ @_ ], [ qw(server login pasword) ]);
+
+    ## update each set of hosts that had similar configurations
+    foreach my $sig (keys %groups) {
+        my @hosts = @{$groups{$sig}};
+        my $key   = $hosts[0];
+        my $ip    = $config{$key}{'wantip'};
+        my $headers = 'PddToken: ' . $config{$key}{'password'};
+
+        # FQDNs
+        for my $host (@hosts) {
+            delete $config{$host}{'wantip'};
+
+            info("setting IP address to %s for %s", $ip, $host);
+            verbose("UPDATE:","updating %s", $host);
+
+            # Get record ID for host
+            my $url = "https://$config{$host}{'server'}/api2/admin/dns/list?";
+            $url       .= "domain=";
+            $url       .= $config{$key}{'login'};
+            my $reply = geturl(opt('proxy'), $url, '', '', $headers);
+            unless ($reply) {
+                    failed("updating %s: Could not connect to %s.", $host, $config{$key}{'server'});
+                    last;
+            }
+            last if !header_ok($host, $reply);
+
+            # Strip header
+            $reply =~ s/^.*?\n\n//s;
+            my $response = eval { decode_json($reply) };
+            if ($response->{success} eq 'error') {
+                    failed ("%s", $response->{error});
+                    next;
+            }
+
+            # Pull the ID out of the json
+            my ($id) = map { $_->{fqdn} eq $host ? $_->{record_id} : () } @{ $response->{records} };
+            unless($id) {
+                    failed("updating %s: DNS record ID not found.", $host);
+                    next;
+            }
+
+            # Update the DNS record
+            $url = "https://$config{$host}{'server'}/api2/admin/dns/edit";
+            my $data   = "domain=";
+            $data   .= $config{$key}{'login'};
+            $data   .= "&record_id=";
+            $data   .= $id;
+            $data   .= "&content=";
+            $data   .= $ip if $ip;
+
+            $reply = geturl(opt('proxy'), $url, '', '', $headers, 'POST', $data);
+            unless ($reply) {
+                failed("updating %s: Could not connect to %s.", $host, $config{$host}{'server'});
+                last;
+            }
+            last if !header_ok($host, $reply);
+
+            # Strip header
+            $reply =~ s/^.*?\n\n//s;
+            $response = eval { decode_json($reply) };
+            if ($response->{success} eq 'error') {
+                    failed ("%s", $response->{error});
+            } else {
+                    success ("%s -- Updated Successfully to %s", $host, $ip);
+            }
+
+            # Cache
+            $config{$host}{'ip'}     = $ip;
+            $config{$host}{'mtime'}  = $now;
+            $config{$host}{'status'} = 'good';
+        }
+    }
+}
 
 ######################################################################
 ## nic_duckdns_examples
@@ -4690,6 +5102,80 @@ sub nic_woima_update {
 }
 
 ######################################################################
+## nic_dondominio_examples
+######################################################################
+sub nic_dondominio_examples {
+    return <<EoEXAMPLE;
+o 'dondominio'
+The 'dondominio' protocol is used by DNS service offered by www.dondominio.com/ .
+API information and user instructions available at: https://dev.dondominio.com/dondns/docs/api/
+Configuration variables applicable to the 'dondominio' protocol are:
+  protocol=dondominio          ##
+  login=service-login          ## the username registered with the service
+  password=dondominio-apikey   ## API key provided by dondominio -see link above-
+  fully.qualified.host         ## the host registered with the service.
+Example ${program}.conf file entries:
+  ## single host update
+  protocol=dondominio,                                   \\
+  login=my-generated-user-name,                          \\
+  password=dondominio-apikey                             \\
+  myhost.tld
+
+EoEXAMPLE
+}
+
+######################################################################
+## nic_dondominio_examples
+######################################################################
+
+sub nic_dondominio_update {
+    debug("\nnic_duckdns_update -------------------");
+
+    ## update each configured host
+    ## should improve to update in one pass
+    foreach my $h (@_) {
+        my $ip = delete $config{$h}{'wantip'};
+        info("setting IP address to %s for %s", $ip, $h);
+        verbose("UPDATE:","updating %s", $h);
+
+        # Set the URL that we're going to update
+        my $url;
+        $url  = "https://$config{$h}{'server'}/plain/";
+        $url .= "?user=";
+        $url .= $config{$h}{'login'};
+        $url .= "&password=";
+        $url .= $config{$h}{'password'};
+        $url .= "&host=";
+        $url .= $h;
+        $url .= "&ip=";
+        $url .= $ip if $ip;
+
+
+        # Try to get URL
+        my $reply = geturl(opt('proxy'), $url);
+
+        # No response, declare as failed
+        if (!defined($reply) || !$reply) {
+            failed("updating %s: Could not connect to %s.", $h, $config{$h}{'server'});
+            last;
+        }
+        last if !header_ok($h, $reply);
+
+        my @reply = split /\n/, $reply;
+        my $returned = pop(@reply);
+        if ($returned =~ /OK/) {
+            $config{$h}{'ip'}     = $ip;
+            $config{$h}{'mtime'}  = $now;
+            $config{$h}{'status'} = 'good';
+            success("updating %s: good: IP address set to %s", $h, $ip);
+        } else {
+            $config{$h}{'status'} = 'failed';
+            failed("updating %s: Server said: '$returned'", $h);
+        }
+    }
+}
+
+######################################################################
 ## nic_dnsmadeeasy_examples
 ######################################################################
 sub nic_dnsmadeeasy_examples {
@@ -4735,6 +5221,8 @@ sub nic_dnsmadeeasy_update {
         'success' => 'Record successfully updated!',
     );
 
+    ## update each configured host
+    ## should improve to update in one pass
     foreach my $h (@_) {
         my $ip = delete $config{$h}{'wantip'};
         info("Setting IP address to %s for %s", $ip, $h);
@@ -4775,7 +5263,6 @@ sub nic_dnsmadeeasy_update {
         }
     }
 }
-
 
 ######################################################################
 # vim: ai ts=4 sw=4 tw=78 :

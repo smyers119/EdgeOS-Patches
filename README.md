@@ -5,7 +5,9 @@ To make patches persist across upgrades add the .deb to
      /config/data/firstboot/install-packages
 ```
 
-
+### ddclient 3.9.1.patch
+#### Currently tested and working on versions after 1.9.7HF4
+This patch was originially made to add support for dnsmadeeasy.  Since then there has been multiple providers and updates added.  To see the full list of updates goto: https://github.com/headhunter911/ddclient
 ### Vyatta-cfg-dhcp-server.patch
 #### Currently tested and working on version 2.0.7 and below
 This patch add's the ability to assign a persistant lease file

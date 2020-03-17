@@ -1,0 +1,7 @@
+multi:
+type: txt
+# help formatted below to appear properly during tab completion
+help: Prefix options for RADVD service. You must
+                use the syntax of radvd.conf in this text-field. Using this
+		without proper knowledge may result in a crashed radvd service.
+		Check system log to look for errors.

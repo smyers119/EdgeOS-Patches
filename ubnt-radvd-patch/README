@@ -1,0 +1,3 @@
+This package had Vyatta cron configuration templates and scripts.
+
+Modern VyOS consolidates all specific code under vyos-1x package, please do not use this package as an example.

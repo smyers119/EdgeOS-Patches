@@ -1,0 +1,16 @@
+#!/bin/bash
+# ubnt-radvd-patch
+# Checks for valid check sum and proceeds with install
+file="/opt/vyatta/sbin/vyatta_gen_radvd.pl"
+fileold="/opt/vyatta/sbin/vyatta_gen_radvd.pl.old"
+sum="47eb8bd4dae8e86c464fd4a119fccef0"
+md5=($(md5sum $file))
+[ ! -f "$file" ] && exit 1
+if [ $md5 == $sum ]; then
+ dpkg-divert --add --package vyatta-cfg-dhcp-server.patch --rename --divert $fileold $file
+ echo "ok"
+ exit 0
+else
+ echo "no file"
+ exit 1
+fi

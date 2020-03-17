@@ -1,0 +1,3 @@
+#!/bin/bash
+file="/opt/vyatta/sbin/vyatta_gen_radvd.pl"
+dpkg-divert --remove --package ubnt-radvd-patch --rename $file

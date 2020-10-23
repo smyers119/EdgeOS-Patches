@@ -1,33 +1,41 @@
-#!/bin/bash                                                                                                                                                    
-                                                                                                                                                               
-GROUP=$1                                                                                                                                                       
+#!/bin/bash
+#/config/scripts# cat wlb-transition.sh                                                                                                                                                    
+# Copyright @Branob from community.ui.com                                                                                                                                                           GROUP=$1                                                                                                                                                       
 INTF=$2                                                                                                                                                        
 STATUS=$3                                                                                                                                                      
                                                                                                                                                                
-MYLOG="/var/log/wlb"                                                                                                                                           
 TS=$(date +"%Y%m%d-%T")                                                                                                                                        
                                                                                                                                                                
-run=/opt/vyatta/bin/vyatta-op-cmd-wrapper                                                                                                                      
-INTFDSCR=$($run show interfaces | grep $INTF | awk '{print $4}')                                                                                               
-                                                                                                                                                               
-/usr/sbin/conntrack -F                                                                                                                                         
-#/usr/sbin/ubnt-add-connected.pl                                                                      
+                                                                                                                                         
+msg="Subject: ALERT: Internet Connection on $INTF status $STATUS
+From: nobody@host.example.com
+Date: `date -R`
+
+
+Interface: $INTF, Group: $GROUP, Status: $STATUS"
+
+
+echo "$msg" |curl -s 'smtps://host.example.com' --ssl-reqd  \
+--mail-from 'somebody@example.com'  \
+--mail-rcpt 'somebody@example.com'  \
+--user 'somebody:password' --insecure                                                                    
+
 
 case "$STATUS" in
   active)
-    msg="$TS: Internet connection $GROUP:$INTF:$INTFDSCR is active."   
-    /config/scripts/pushover.sh "Router $(hostname) WAN fail-over event" "$msg" &    ;;
+  msg="$TS: Internet connection $GROUP:$INTF is active."   
+  ;;
   inactive)
-   msg="$TS: Internet connection $GROUP:$INTF:$INTFDSCR is inactive."
+   msg="$TS: Internet connection $GROUP:$INTF is inactive."
   ;;
   failover)
-    msg="$TS: Internet connection $GROUP:$INTF:$INTFDSCR is failover."   
+    msg="$TS: Internet connection $GROUP:$INTF is failover."   
   ;;
   *)
-   msg="$TS: Oh crap, $GROUP:$INTF:$INTFDSCR going [$STATUS]"
+   msg="$TS: Oh crap, $GROUP:$INTF going [$STATUS]"
   ;;
 esac
 
-echo $msg >> $MYLOG
+
 logger $msg
 exit 0

@@ -11,6 +11,8 @@ targets=(
 latcheck=true
 # Jitter check (true|false)
 jitcheck=true
+# If strictcheck=true then latency and jitter must be over max before failing
+strictcheck=true 
 # add max latency/jitter here
 maxlat=200
 maxjit=20
@@ -35,6 +37,7 @@ striplat=$(echo ${jitter%.*})
 [[ $latcheck = "true" && $jitcheck = "false" && $striplat -gt $maxlat ]] && continue
 [[ $latcheck = "false" && $jitcheck = "true" && $stripjit -gt $maxjit ]] && continue
 [[ $latcheck = "true" && $jitcheck = "true" && ($striplat -gt $maxlat || $stripjit -gt $maxjit) ]] && continue
+[[ $strictcheck = "true" && ($striplat -gt $maxlat && $stripjit -gt $maxjit) ]] && continue
 #end check latency/jitter
 exit 0
 fi

@@ -8,9 +8,12 @@ targets=(
    '8.8.4.4' 
    ) 
 # latency check (true|false)
-check=true
-# add max latency here
-max=200
+latcheck=true
+# Jitter check (true|false)
+jitcheck=true
+# add max latency/jitter here
+maxlat=200
+maxjit=20
 [ $# != 3 ] && echo "Usages: $0 <group> <intf> <status>" exit 1
 group=$1
 intf=$2
@@ -18,16 +21,21 @@ status=$3
 for host in "${targets[@]}"
 do
 pings () {
-/bin/ping -n -c 4 -W 1 -w 1 -i 0.2 -I $2 $1 | tail -1 | awk -F '/' '{print $5}'
+/bin/ping -n -c 4 -W 1 -w 1 -i 0.2 -I $2 $1 | tail -1 | awk -F '/' '{print $5 "-" $7}'
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
 return 1
 fi
 }
-if latency=$(pings "$host" "$intf");
+if results=$(pings "$host" "$intf");
+latency=$(echo $results | cut -f1 -d-)
+jitter=$(echo $results | cut -f2 -d-)
 then
-strip=$(echo ${latency%.*})
-[[ $check = "true" ]] && [[ $strip -gt $max ]] && continue
-#end check latency
+striplat=$(echo ${latency%.*})
+striplat=$(echo ${jitter%.*})
+[[ $latcheck = "true" && $jitcheck = "false" && $striplat -gt $maxlat ]] && continue
+[[ $latcheck = "false" && $jitcheck = "true" && $stripjit -gt $maxjit ]] && continue
+[[ $latcheck = "true" && $jitcheck = "true" && ($striplat -gt $maxlat || $stripjit -gt $maxjit) ]] && continue
+#end check latency/jitter
 exit 0
 fi
 done

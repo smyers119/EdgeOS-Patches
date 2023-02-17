@@ -4549,8 +4549,7 @@ EoEXAMPLE
 ######################################################################
 sub nic_cloudflare_update {
 	debug("\nnic_cloudflare_update -------------------");
-
-	## group hosts with identical attributes together 
+		## group hosts with identical attributes together 
 	my %groups = group_hosts_by([ @_ ], [ qw(ssh login password server wildcard mx backupmx zone) ]);
 
 	## update each set of hosts that had similar configurations
@@ -4560,10 +4559,15 @@ sub nic_cloudflare_update {
 		my $key   = $hosts[0];
 		my $ip    = $config{$key}{'wantip'};
 
-		my $headers = "X-Auth-Email: $config{$key}{'login'}\n";
-		$headers .= "X-Auth-Key: $config{$key}{'password'}\n";
-		$headers .= "Content-Type: application/json";
-
+        
+        if ($config{$key}{'login'} eq 'token') {
+            my $headers = "Authorization: Bearer $config{$key}{'password'}\n";
+        } else {
+            my $headers = "X-Auth-Email: $config{$key}{'login'}\n";
+               $headers .= "X-Auth-Key: $config{$key}{'password'}\n";
+		}
+               $headers .= "Content-Type: application/json\n";
+    
 		# FQDNs
 		for my $domain (@hosts) {
 			(my $hostname = $domain) =~ s/\.$config{$key}{zone}$//;
@@ -4583,13 +4587,13 @@ sub nic_cloudflare_update {
 			}
 			last if !header_ok($domain, $reply);
 
-			# Strip header
-			$reply =~ s/^.*?\n\n//s;
-			my $response = eval {decode_json($reply)};
-			if (!defined $response || !defined $response->{result}) {
-				failed ("invalid json or result.");
-				next; 
-			}
+            # Strip header
+            $reply =~ qr/{(?:[^{}]*|(?R))*}/mp;
+            my $response = eval {decode_json(${^MATCH})};
+            unless ($response && $response->{result}) {
+                failed("updating %s: invalid json or result.", $domain);
+                next;
+            }
 
 			# Pull the ID out of the json, messy
 			my ($zone_id) = map { $_->{name} eq $config{$key}{'zone'} ? $_->{id} : () } @{ $response->{result} };
@@ -4614,14 +4618,13 @@ sub nic_cloudflare_update {
 			}
 			last if !header_ok($domain, $reply);
 
-			# Strip header
-			$reply =~ s/^.*?\n\n//s;
-			$response = eval {decode_json($reply)};
-			if (!defined $response || !defined $response->{result}) {
-				failed ("invalid json or result.");
-				next; 
-			}
-
+            # Strip header
+            $reply =~ qr/{(?:[^{}]*|(?R))*}/mp;
+            $response = eval {decode_json(${^MATCH})};
+            unless ($response && $response->{result}) {
+                failed("updating %s: invalid json or result.", $domain);
+                next;
+            }
 			# Pull the ID out of the json, messy
 			my ($dns_rec_id) = map { $_->{name} eq $domain ? $_->{id} : () } @{ $response->{result} };
 			unless($dns_rec_id) {
@@ -4641,14 +4644,13 @@ sub nic_cloudflare_update {
 			last if !header_ok($domain, $reply);
 
 			# Strip header
-			$reply =~ s/^.*?\n\n//s;
-			$response = eval {decode_json($reply)};
-			if (!defined $response || !defined $response->{result}) {
-				failed ("invalid json or result.");
-			} else {
-				success ("%s -- Updated Successfully to %s", $domain, $ip);
-
-			}
+            $reply =~ qr/{(?:[^{}]*|(?R))*}/mp;
+            $response = eval {decode_json(${^MATCH})};
+            if ($response && $response->{result}) {
+                success ("%s -- Updated Successfully to %s", $domain, $ip);
+            } else {
+                failed("updating %s: invalid json or result.", $domain);
+            }
 
 			# Cache
 			$config{$key}{'ip'}     = $ip;
@@ -4657,121 +4659,6 @@ sub nic_cloudflare_update {
 		}
 	}
 }
-######################################################################
-## nic_yandex_examples
-######################################################################
-sub nic_yandex_examples {
-    return <<EoEXAMPLE;
-o Yandex
-
-The 'yandex' protocol is used to by DNS service offered by Yandex.
-
-Configuration variables applicable to the 'yandex' protocol are:
-  protocol=yandex             ##
-  server=fqdn.of.service       ## defaults to pddimp.yandex.ru
-  login=dns.zone               ## Your zone name
-  password=pdd-token           ## PDD token for authentication
-  fully.qualified.host         ## the host registered with the service.
-
-Example ${program}.conf file entries:
-  ## single host update
-  protocol=yandex,                                         \\
-  login=myhost.com,                                        \\
-  password=123456789ABCDEF0000000000000000000000000000000000000 \\
-  record.myhost.com
-
-  ## multiple host update
-  protocol=yandex,                                         \\
-  login=myhost.com,                                        \\
-  password=123456789ABCDEF0000000000000000000000000000000000000 \\
-  record.myhost.com,other.myhost.com
-EoEXAMPLE
-}
-######################################################################
-## nic_yandex_update
-##
-## written by Denis Akimkin
-##
-######################################################################
-sub nic_yandex_update {
-    debug("\nnic_yandex_update -------------------");
-
-    ## group hosts with identical attributes together
-    my %groups = group_hosts_by([ @_ ], [ qw(server login pasword) ]);
-
-    ## update each set of hosts that had similar configurations
-    foreach my $sig (keys %groups) {
-        my @hosts = @{$groups{$sig}};
-        my $key   = $hosts[0];
-        my $ip    = $config{$key}{'wantip'};
-        my $headers = 'PddToken: ' . $config{$key}{'password'};
-
-        # FQDNs
-        for my $host (@hosts) {
-            delete $config{$host}{'wantip'};
-
-            info("setting IP address to %s for %s", $ip, $host);
-            verbose("UPDATE:","updating %s", $host);
-
-            # Get record ID for host
-            my $url = "https://$config{$host}{'server'}/api2/admin/dns/list?";
-            $url       .= "domain=";
-            $url       .= $config{$key}{'login'};
-            my $reply = geturl(opt('proxy'), $url, '', '', $headers);
-            unless ($reply) {
-                    failed("updating %s: Could not connect to %s.", $host, $config{$key}{'server'});
-                    last;
-            }
-            last if !header_ok($host, $reply);
-
-            # Strip header
-            $reply =~ s/^.*?\n\n//s;
-            my $response = eval { decode_json($reply) };
-            if ($response->{success} eq 'error') {
-                    failed ("%s", $response->{error});
-                    next;
-            }
-
-            # Pull the ID out of the json
-            my ($id) = map { $_->{fqdn} eq $host ? $_->{record_id} : () } @{ $response->{records} };
-            unless($id) {
-                    failed("updating %s: DNS record ID not found.", $host);
-                    next;
-            }
-
-            # Update the DNS record
-            $url = "https://$config{$host}{'server'}/api2/admin/dns/edit";
-            my $data   = "domain=";
-            $data   .= $config{$key}{'login'};
-            $data   .= "&record_id=";
-            $data   .= $id;
-            $data   .= "&content=";
-            $data   .= $ip if $ip;
-
-            $reply = geturl(opt('proxy'), $url, '', '', $headers, 'POST', $data);
-            unless ($reply) {
-                failed("updating %s: Could not connect to %s.", $host, $config{$host}{'server'});
-                last;
-            }
-            last if !header_ok($host, $reply);
-
-            # Strip header
-            $reply =~ s/^.*?\n\n//s;
-            $response = eval { decode_json($reply) };
-            if ($response->{success} eq 'error') {
-                    failed ("%s", $response->{error});
-            } else {
-                    success ("%s -- Updated Successfully to %s", $host, $ip);
-            }
-
-            # Cache
-            $config{$host}{'ip'}     = $ip;
-            $config{$host}{'mtime'}  = $now;
-            $config{$host}{'status'} = 'good';
-        }
-    }
-}
-
 ######################################################################
 ## nic_duckdns_examples
 ######################################################################

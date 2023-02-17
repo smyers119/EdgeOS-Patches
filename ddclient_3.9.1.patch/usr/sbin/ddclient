@@ -442,6 +442,7 @@ my %variables = (
     },
 	'cloudflare-common-defaults'       => {
 		'server'	      => setv(T_FQDNP,  1, 0, 1, 'api.cloudflare.com/client/v4', undef),
+		'login'               => setv(T_LOGIN,  0, 0, 1, 'token',                  undef),
 		'zone'                => setv(T_FQDN,   1, 0, 1, '',                  undef),
 		'static'              => setv(T_BOOL,   0, 1, 1, 0,                   undef),
 		'wildcard'            => setv(T_BOOL,   0, 1, 1, 0,                   undef),
@@ -4560,9 +4561,13 @@ sub nic_cloudflare_update {
 		my $key   = $hosts[0];
 		my $ip    = $config{$key}{'wantip'};
 
-		my $headers = "X-Auth-Email: $config{$key}{'login'}\n";
-		$headers .= "X-Auth-Key: $config{$key}{'password'}\n";
-		$headers .= "Content-Type: application/json";
+        	my $headers = "Content-Type: application/json\n";
+        	if ($config{$key}{'login'} eq 'token') {
+            		$headers .= "Authorization: Bearer $config{$key}{'password'}\n";
+        	} else {
+            		$headers .= "X-Auth-Email: $config{$key}{'login'}\n";
+            		$headers .= "X-Auth-Key: $config{$key}{'password'}\n";
+        	}
 
 		# FQDNs
 		for my $domain (@hosts) {

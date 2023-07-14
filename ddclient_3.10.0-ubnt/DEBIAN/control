@@ -1,5 +1,5 @@
 Package: ddclient
-Version: 3.9.1.patch
+Version: 3.10.0
 Architecture: all
 Maintainer: Torsten Landschoff <torsten@debian.org>
 Depends: perl, debconf (>= 0.5) | debconf-2.0, lsb-base (>= 3.1)

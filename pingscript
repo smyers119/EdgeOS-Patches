@@ -33,7 +33,7 @@ latency=$(echo $results | cut -f1 -d-)
 jitter=$(echo $results | cut -f2 -d-)
 then
 striplat=$(echo ${latency%.*})
-striplat=$(echo ${jitter%.*})
+stripjit=$(echo ${jitter%.*})
 [[ $latcheck = "true" && $jitcheck = "false" && $striplat -gt $maxlat ]] && continue
 [[ $latcheck = "false" && $jitcheck = "true" && $stripjit -gt $maxjit ]] && continue
 [[ $latcheck = "true" && $jitcheck = "true" && ($striplat -gt $maxlat || $stripjit -gt $maxjit) ]] && continue

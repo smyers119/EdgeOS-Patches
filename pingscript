@@ -28,10 +28,9 @@ if [ ${PIPESTATUS[0]} -ne 0 ]; then
 return 1
 fi
 }
-if results=$(pings "$host" "$intf");
+if results=$(pings "$host" "$intf"); then
 latency=$(echo $results | cut -f1 -d-)
 jitter=$(echo $results | cut -f2 -d-)
-then
 striplat=$(echo ${latency%.*})
 stripjit=$(echo ${jitter%.*})
 [[ $latcheck = "true" && $jitcheck = "false" && $striplat -gt $maxlat ]] && break

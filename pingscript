@@ -34,12 +34,14 @@ jitter=$(echo $results | cut -f2 -d-)
 then
 striplat=$(echo ${latency%.*})
 stripjit=$(echo ${jitter%.*})
-[[ $latcheck = "true" && $jitcheck = "false" && $striplat -gt $maxlat ]] && continue
-[[ $latcheck = "false" && $jitcheck = "true" && $stripjit -gt $maxjit ]] && continue
-[[ $latcheck = "true" && $jitcheck = "true" && ($striplat -gt $maxlat || $stripjit -gt $maxjit) ]] && continue
-[[ $strictcheck = "true" && ($striplat -gt $maxlat && $stripjit -gt $maxjit) ]] && continue
+[[ $latcheck = "true" && $jitcheck = "false" && $striplat -gt $maxlat ]] && break
+[[ $latcheck = "false" && $jitcheck = "true" && $stripjit -gt $maxjit ]] && break   
+[[ $latcheck = "true" && $jitcheck = "true" && ($striplat -gt $maxlat || $stripjit -gt $maxjit) ]] && break
+[[ $strictcheck = "true" && ($striplat -gt $maxlat && $stripjit -gt $maxjit) ]] && break
 #end check latency/jitter
 exit 0
+else
+   break
 fi
 done
 # fail
